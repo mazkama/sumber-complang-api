@@ -11,6 +11,7 @@ use App\Models\Tiket;
 use Midtrans\Snap;
 use Midtrans\Config;
 use Midtrans\Notification;
+use App\Services\XenditService;
 
 class TransaksiTiketController extends Controller
 {
@@ -122,7 +123,145 @@ class TransaksiTiketController extends Controller
     //     }
     // }
 
-    public function createTransaction(Request $request)
+    // public function createTransaction(Request $request)
+    // {
+    //     try {
+    //         // Validasi request
+    //         $validated = $request->validate([
+    //             'metode_pembayaran' => 'required|in:ewallet,tunai',
+    //             'tiket_details' => 'required|array|min:1',
+    //             'tiket_details.*.id_tiket' => 'required|exists:tiket,id_tiket',
+    //             'tiket_details.*.jumlah' => 'required|integer|min:1',
+    //         ]);
+
+    //         $user = Auth::user();
+    //         $orderId = 'ORDER-' . time();
+
+    //         $totalHarga = 0;
+    //         $detailTransaksi = [];
+
+    //         foreach ($request->tiket_details as $detail) {
+    //             $tiket = Tiket::find($detail['id_tiket']);
+    //             $subtotal = $tiket->harga * $detail['jumlah'];
+    //             $totalHarga += $subtotal;
+
+    //             $detailTransaksi[] = [
+    //                 'id_tiket' => $tiket->id_tiket,
+    //                 'nama_tiket' => $tiket->nama_tiket,
+    //                 'harga_satuan' => $tiket->harga,
+    //                 'jumlah' => $detail['jumlah'],
+    //                 'subtotal' => $subtotal,
+    //             ];
+    //         }
+
+    //         // Simpan transaksi utama
+    //         $transaksi = TransaksiTiket::create([
+    //             'id_user' => $user->id_user,
+    //             'total_harga' => $totalHarga,
+    //             'metode_pembayaran' => $request->metode_pembayaran,
+    //             'status' => $request->metode_pembayaran == 'ewallet' ? 'menunggu' : 'dibayar',
+    //             'order_id' => $orderId,
+    //         ]);
+
+    //         // Simpan detail transaksi
+    //         foreach ($detailTransaksi as $detail) {
+    //             DetailTransaksiTiket::create([
+    //                 'id_transaksi_tiket' => $transaksi->id_transaksi_tiket,
+    //                 'id_tiket' => $detail['id_tiket'],
+    //                 'jumlah' => $detail['jumlah'],
+    //                 'subtotal' => $detail['subtotal'],
+    //             ]);
+    //         }
+
+    //         // Respon dasar
+    //         $responseData = [
+    //             'order_id' => $orderId,
+    //             'status' => $transaksi->status,
+    //             'tanggal' => $transaksi->created_at->format('Y-m-d H:i:s'),
+    //             'payment_type' => $request->metode_pembayaran,
+    //             'gross_amount' => $totalHarga,
+    //             'user' => [
+    //                 'id_user' => $user->id_user,
+    //                 'name' => $user->name,
+    //                 'email' => $user->email,
+    //             ],
+    //             'detail_transaksi' => $detailTransaksi,
+    //         ];
+
+    //         // Jika metode ewallet, proses ke Midtrans
+    //         if ($request->metode_pembayaran === 'ewallet') {
+    //             Config::$serverKey = config('midtrans.server_key');
+    //             Config::$clientKey = config('midtrans.clientKey');
+    //             Config::$isProduction = config('midtrans.is_production');
+    //             Config::$isSanitized = true;
+    //             Config::$is3ds = true;
+
+    //             $item_details = array_map(function ($item) {
+    //                 return [
+    //                     'id' => $item['id_tiket'],
+    //                     'price' => $item['harga_satuan'],
+    //                     'quantity' => $item['jumlah'],
+    //                     'name' => $item['nama_tiket'],
+    //                 ];
+    //             }, $detailTransaksi);
+
+    //             $transaction_data = [
+    //                 'payment_type' => 'qris',
+    //                 'transaction_details' => [
+    //                     'order_id' => $orderId,
+    //                     'gross_amount' => (int) $totalHarga,
+    //                 ],
+    //                 'item_details' => array_map(function ($item) {
+    //                     return [
+    //                         'id' => (string) $item['id_tiket'],
+    //                         'price' => (int) $item['harga_satuan'],
+    //                         'quantity' => (int) $item['jumlah'],
+    //                         'name' => substr($item['nama_tiket'], 0, 50),
+    //                     ];
+    //                 }, $detailTransaksi),
+    //                 'customer_details' => [
+    //                     'first_name' => $user->name,
+    //                     'email' => $user->email,
+    //                 ],
+    //                 'callbacks' => [
+    //                     'finish' => url('/payment/finish'),
+    //                 ],
+    //             ];
+
+    //             $snapTransaction = Snap::createTransaction($transaction_data);
+
+    //             // Simpan redirect_url ke database
+    //             $transaksi->redirect_url = $snapTransaction->redirect_url;
+    //             $transaksi->save(); // penting: simpan perubahan
+
+    //             $responseData['redirect_url'] = $snapTransaction->redirect_url;
+
+    //             return response()->json([
+    //                 'success' => true,
+    //                 'message' => 'Transaksi berhasil dibuat, silakan lanjutkan pembayaran.',
+    //                 'data' => $responseData,
+    //             ]);
+    //         }
+
+    //         // Jika metode tunai
+    //         return response()->json([
+    //             'success' => true,
+    //             'message' => 'Transaksi tunai berhasil dibuat.',
+    //             'data' => $responseData,
+    //         ]);
+    //     } catch (\Exception $e) {
+    //         return response()->json(
+    //             [
+    //                 'success' => false,
+    //                 'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
+    //             ],
+    //             500,
+    //         );
+    //     }
+    // }
+
+    // Create a new transaction for tickets with Xendit integration
+    public function createTransaction(Request $request, XenditService $xendit)
     {
         try {
             // Validasi request
@@ -172,7 +311,6 @@ class TransaksiTiketController extends Controller
                 ]);
             }
 
-            // Respon dasar
             $responseData = [
                 'order_id' => $orderId,
                 'status' => $transaksi->status,
@@ -187,67 +325,55 @@ class TransaksiTiketController extends Controller
                 'detail_transaksi' => $detailTransaksi,
             ];
 
-            // Jika metode ewallet, proses ke Midtrans
+            // Jika metode ewallet, proses ke Xendit (QRIS)
             if ($request->metode_pembayaran === 'ewallet') {
-                Config::$serverKey = config('midtrans.server_key');
-                Config::$clientKey = config('midtrans.clientKey');
-                Config::$isProduction = config('midtrans.is_production');
-                Config::$isSanitized = true;
-                Config::$is3ds = true;
-
-                $item_details = array_map(function ($item) {
-                    return [
-                        'id' => $item['id_tiket'],
-                        'price' => $item['harga_satuan'],
-                        'quantity' => $item['jumlah'],
-                        'name' => $item['nama_tiket'],
-                    ];
-                }, $detailTransaksi);
-
-                $transaction_data = [
-                    'payment_type' => 'qris',
-                    'transaction_details' => [
-                        'order_id' => $orderId,
-                        'gross_amount' => (int) $totalHarga,
-                    ],
-                    'item_details' => array_map(function ($item) {
-                        return [
-                            'id' => (string) $item['id_tiket'],
-                            'price' => (int) $item['harga_satuan'],
-                            'quantity' => (int) $item['jumlah'],
-                            'name' => substr($item['nama_tiket'], 0, 50),
-                        ];
-                    }, $detailTransaksi),
-                    'customer_details' => [
-                        'first_name' => $user->name,
-                        'email' => $user->email,
-                    ],
-                    'callbacks' => [
-                        'finish' => url('/payment/finish'),
-                    ],  
+                // Prepare parameter invoice Xendit
+                $params = [
+                    'external_id' => $orderId,
+                    'amount' => $totalHarga,
+                    'payer_email' => $user->email,
+                    'description' => 'Pembayaran tiket dengan order ID ' . $orderId,
+                    // 'payment_methods' => ['CREDIT_CARD', 'BANK_TRANSFER', 'QRIS', 'EWALLET'],
+                    'success_redirect_url' => url('/payment/success'),
+                    'failure_redirect_url' => url('/payment/failure'),
                 ];
 
-                $snapTransaction = Snap::createTransaction($transaction_data);
+                $invoice = $xendit->createInvoice($params);
 
-                // Simpan redirect_url ke database
-                $transaksi->redirect_url = $snapTransaction->redirect_url;
-                $transaksi->save(); // penting: simpan perubahan
+                // Simpan redirect_url invoice ke database
+                $transaksi->redirect_url = $invoice['invoice_url'] ?? null;
+                $transaksi->save();
 
-                $responseData['redirect_url'] = $snapTransaction->redirect_url;
+                $responseData['redirect_url'] = $invoice['invoice_url'] ?? null;
 
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Transaksi berhasil dibuat, silakan lanjutkan pembayaran.',
-                    'data' => $responseData,
-                ]);
+                return response()->json(
+                    [
+                        'success' => true,
+                        'message' => 'Transaksi berhasil dibuat, silakan lanjutkan pembayaran melalui QRIS.',
+                        'data' => $responseData,
+                    ],
+                    201,
+                );
             }
 
             // Jika metode tunai
-            return response()->json([
-                'success' => true,
-                'message' => 'Transaksi tunai berhasil dibuat.',
-                'data' => $responseData,
-            ]);
+            return response()->json(
+                [
+                    'success' => true,
+                    'message' => 'Transaksi tunai berhasil dibuat.',
+                    'data' => $responseData,
+                ],
+                201,
+            );
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Validasi gagal',
+                    'errors' => $e->errors(),
+                ],
+                422,
+            );
         } catch (\Exception $e) {
             return response()->json(
                 [
@@ -256,6 +382,65 @@ class TransaksiTiketController extends Controller
                 ],
                 500,
             );
+        }
+    }
+
+    public function xenditNotification(Request $request)
+    {
+        // Ambil token webhook dari header request
+        $callbackToken = $request->header('X-Callback-Token');
+
+        // Cek apakah token cocok dengan secret di .env
+        if ($callbackToken !== env('XENDIT_WEBHOOK_SECRET')) {
+            Log::warning('Webhook Xendit: Token tidak valid', ['token' => $callbackToken]);
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        // Log data payload untuk debugging
+        Log::info('Notifikasi Xendit Masuk', $request->all());
+
+        try {
+            $data = $request->all();
+
+            $external_id = $data['external_id'] ?? null;
+            $status = $data['status'] ?? null;
+
+            if (!$external_id || !$status) {
+                Log::warning('Payload Xendit tidak lengkap', $data);
+                return response()->json(['message' => 'Payload tidak lengkap'], 400);
+            }
+
+            // Cari transaksi berdasarkan order_id (external_id)
+            $transaksi = TransaksiTiket::where('order_id', $external_id)->first();
+
+            if (!$transaksi) {
+                Log::warning("Transaksi dengan order_id $external_id tidak ditemukan");
+                return response()->json(['message' => 'Transaksi tidak ditemukan'], 404);
+            }
+
+            // Update status transaksi sesuai status dari Xendit
+            switch ($status) {
+                case 'PAID':
+                    $transaksi->status = 'dibayar'; 
+                    break;
+                case 'PENDING':
+                    $transaksi->status = 'menunggu';
+                    break;
+                case 'EXPIRED':
+                case 'FAILED':
+                    $transaksi->status = 'dibatalkan'; 
+                    break;
+                default:
+                    $transaksi->status = 'gagal';
+                    break;
+            }
+
+            $transaksi->save();
+
+            return response()->json(['status' => 'success'], 200);
+        } catch (\Exception $e) {
+            Log::error('Error notifikasi Xendit: ' . $e->getMessage());
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
         }
     }
 

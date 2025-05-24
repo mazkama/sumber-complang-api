@@ -27,6 +27,7 @@ Route::post('/transaksi-tiket', [TransaksiTiketController::class, 'createTransac
 Route::get('/transaksi/detail/{orderId}', [TransaksiTiketController::class, 'showTransactionDetail']);
 
 Route::post('/midtrans-notification', [TransaksiTiketController::class, 'notification']);
+Route::post('/xendit-notification', [TransaksiTiketController::class, 'xenditNotification']);
 Route::get('/final-transaksi/{order_id}', [TransaksiTiketController::class, 'finalTransaction']);
 
 Route::apiResource('kolam', KolamController::class);
