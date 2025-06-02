@@ -1,12 +1,11 @@
 <?php
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Route; 
+use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\TransaksiTiketController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\KolamController;
 use App\Http\Controllers\TiketController;
-
 
 /*
 |--------------------------------------------------------------------------
@@ -23,7 +22,12 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
 });
 
-Route::post('/transaksi-tiket', [TransaksiTiketController::class, 'createTransaction'])->middleware('auth:sanctum');
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/transaksi-tiket', [TransaksiTiketController::class, 'index']);
+    Route::post('/transaksi-tiket', [TransaksiTiketController::class, 'createTransaction']);
+});
+
+Route::post('/transaksi/{orderId}/cancel', [TransaksiTiketController::class, 'cancelTransaction']);
 Route::get('/transaksi/detail/{orderId}', [TransaksiTiketController::class, 'showTransactionDetail']);
 
 Route::post('/midtrans-notification', [TransaksiTiketController::class, 'notification']);
