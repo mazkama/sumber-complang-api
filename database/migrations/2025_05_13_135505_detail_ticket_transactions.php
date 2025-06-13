@@ -15,6 +15,8 @@ return new class extends Migration
             $table->id('id_detail_transaksi_tiket');
             $table->unsignedBigInteger('id_transaksi_tiket');
             $table->unsignedBigInteger('id_tiket');
+            $table->string('no_kendaraan')->nullable();
+            $table->timestamp('waktu_validasi')->nullable();
             $table->integer('jumlah');
             $table->decimal('subtotal', 15, 2);
             $table->timestamps();

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use PDF;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
@@ -19,16 +20,30 @@ class TransaksiTiketController extends Controller
     {
         try {
             $user = Auth::user();
-            $filter = $request->query('jenis'); // nilai: semua | kolam | parkir
+            $jenisFilter = $request->query('jenis'); // nilai: semua | kolam | parkir
+            $statusFilter = $request->query('status'); // nilai: all | reserved
 
-            // Query dasar
-            $query = TransaksiTiket::where('id_user', $user->id_user)->latest();
+            // Query dasar - cek role user
+            if ($user->role === 'pengunjung') {
+                // Jika pengunjung, hanya tampilkan transaksi milik user tersebut
+                $query = TransaksiTiket::where('id_user', $user->id_user)->latest();
+                Log::info('User pengunjung melihat transaksi sendiri', ['user_id' => $user->id_user]);
+            } else {
+                // Jika admin/petugas, tampilkan semua transaksi
+                $query = TransaksiTiket::latest();
+                Log::info('petugas melihat semua transaksi', ['user_role' => $user->role]);
+            }
 
             // Filter berdasarkan jenis tiket jika diperlukan
-            if (in_array($filter, ['kolam', 'parkir'])) {
-                $query->whereHas('detailTransaksiTiket.tiket', function ($q) use ($filter) {
-                    $q->where('jenis', $filter);
+            if (in_array($jenisFilter, ['kolam', 'parkir'])) {
+                $query->whereHas('detailTransaksiTiket.tiket', function ($q) use ($jenisFilter) {
+                    $q->where('jenis', $jenisFilter);
                 });
+            }
+
+            // Filter berdasarkan status transaksi
+            if ($statusFilter === 'reserved') {
+                $query->whereIn('status', ['selesai', 'divalidasi']);
             }
 
             // Ambil data transaksi + relasi (untuk internal pemrosesan)
@@ -44,8 +59,17 @@ class TransaksiTiketController extends Controller
                     $item->jenis_transaksi = $jenisList->first(); // "kolam" atau "parkir"
                 }
 
+                // Tambahkan informasi user jika bukan pengunjung
+                if (Auth::user()->role !== 'pengunjung') {
+                    $item->customer_info = [
+                        'name' => $item->user->name ?? 'Unknown',
+                        'username' => $item->user->username ?? 'Unknown',
+                    ];
+                }
+
                 // Hapus relasi dari output
                 unset($item->detailTransaksiTiket);
+                unset($item->user);
 
                 return $item;
             });
@@ -54,25 +78,156 @@ class TransaksiTiketController extends Controller
                 'success' => true,
                 'message' => 'Daftar transaksi berhasil diambil.',
                 'data' => $transaksi,
+                'filters_applied' => [
+                    'jenis' => $jenisFilter ?? 'semua',
+                    'status' => $statusFilter ?? 'all',
+                    'view_mode' => $user->role === 'pengunjung' ? 'personal' : 'all',
+                ],
             ]);
         } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Gagal mengambil data transaksi: ' . $e->getMessage(),
-            ], 500);
+            Log::error('Error fetching transactions', [
+                'error_message' => $e->getMessage(),
+                'user_id' => Auth::id(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Gagal mengambil data transaksi: ' . $e->getMessage(),
+                ],
+                500,
+            );
         }
-    } 
+    }
+
+    public function exportMonthlyReport(Request $request)
+    {
+        try {
+            // Set timezone untuk Indonesia
+            date_default_timezone_set('Asia/Jakarta');
+
+            // Dapatkan bulan, tahun, dan jenis filter
+            $month = $request->get('bulan', date('m'));
+            $year = $request->get('tahun', date('Y'));
+            $jenisFilter = $request->get('jenis', 'semua'); // Tambahkan filter jenis tiket
+
+            // Format nama bulan untuk display
+            $bulanIndonesia = [
+                '01' => 'Januari',
+                '02' => 'Februari',
+                '03' => 'Maret',
+                '04' => 'April',
+                '05' => 'Mei',
+                '06' => 'Juni',
+                '07' => 'Juli',
+                '08' => 'Agustus',
+                '09' => 'September',
+                '10' => 'Oktober',
+                '11' => 'November',
+                '12' => 'Desember',
+            ];
+
+            $namaBulan = $bulanIndonesia[$month] ?? 'Unknown';
+
+            // Query untuk mengambil transaksi
+            $query = TransaksiTiket::with(['user', 'detailTransaksiTiket.tiket'])
+                ->whereIn('status', ['selesai', 'dibayar', 'divalidasi'])
+                ->whereYear('created_at', $year)
+                ->whereMonth('created_at', $month);
+
+            // Filter berdasarkan jenis tiket jika diperlukan
+            if (in_array($jenisFilter, ['kolam', 'parkir'])) {
+                $query->whereHas('detailTransaksiTiket.tiket', function ($q) use ($jenisFilter) {
+                    $q->where('jenis', $jenisFilter);
+                });
+            }
+
+            $transactions = $query->orderBy('created_at', 'desc')->get();
+
+            // Hitung jumlah transaksi per status
+            $countByStatus = [
+                'selesai' => $transactions->where('status', 'selesai')->count(),
+                'dibayar' => $transactions->where('status', 'dibayar')->count(),
+                'divalidasi' => $transactions->where('status', 'divalidasi')->count(),
+            ];
+
+            // Hitung jumlah tiket per transaksi dan total keseluruhan
+            $ticketCounts = [];
+            $totalTickets = [
+                'kolam' => 0,
+                'parkir' => 0,
+                'total' => 0,
+            ];
+
+            foreach ($transactions as $transaction) {
+                $ticketCounts[$transaction->id_transaksi_tiket] = [
+                    'kolam' => 0,
+                    'parkir' => 0,
+                    'total' => 0,
+                ];
+
+                foreach ($transaction->detailTransaksiTiket as $detail) {
+                    $jenis = $detail->tiket->jenis ?? 'unknown';
+
+                    if (in_array($jenis, ['kolam', 'parkir'])) {
+                        $ticketCounts[$transaction->id_transaksi_tiket][$jenis] += $detail->jumlah;
+                        $ticketCounts[$transaction->id_transaksi_tiket]['total'] += $detail->jumlah;
+                        $totalTickets[$jenis] += $detail->jumlah;
+                        $totalTickets['total'] += $detail->jumlah;
+                    }
+                }
+            }
+
+            // Hitung total omset
+            $totalOmset = $transactions->sum('total_harga');
+
+            // Generate PDF
+            $pdf = PDF::loadView('export', [
+                'transactions' => $transactions,
+                'countByStatus' => $countByStatus,
+                'ticketCounts' => $ticketCounts,
+                'totalTickets' => $totalTickets,
+                'totalOmset' => $totalOmset,
+                'bulan' => $namaBulan,
+                'tahun' => $year,
+                'jenisFilter' => $jenisFilter,
+            ]);
+
+            // Set paper size dan orientation
+            $pdf->setPaper('a4', 'landscape');
+
+            // Download PDF dengan nama yang sesuai
+            $jenisText = $jenisFilter != 'semua' ? ucfirst($jenisFilter) . '_' : '';
+            return $pdf->download("Laporan_Transaksi_{$jenisText}{$namaBulan}_{$year}.pdf");
+        } catch (\Exception $e) {
+            Log::error('Error generating PDF report', [
+                'error_message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Gagal membuat laporan PDF: ' . $e->getMessage(),
+                ],
+                500,
+            );
+        }
+    }
 
     // Create a new transaction for tickets with Xendit integration
     public function createTransaction(Request $request, XenditService $xendit)
     {
+        Log::info('data transaksi masuk', $request->all());
         try {
-            // Validasi request
+            // Validasi request (Updated validation)
             $validated = $request->validate([
                 'metode_pembayaran' => 'required|in:ewallet,tunai',
                 'tiket_details' => 'required|array|min:1',
                 'tiket_details.*.id_tiket' => 'required|exists:tiket,id_tiket',
                 'tiket_details.*.jumlah' => 'required|integer|min:1',
+                'tiket_details.*.no_kendaraan' => 'nullable|string|max:20', // Add vehicle number validation
             ]);
 
             $user = Auth::user();
@@ -86,13 +241,21 @@ class TransaksiTiketController extends Controller
                 $subtotal = $tiket->harga * $detail['jumlah'];
                 $totalHarga += $subtotal;
 
-                $detailTransaksi[] = [
+                // Add no_kendaraan to detail if provided
+                $detailItem = [
                     'id_tiket' => $tiket->id_tiket,
                     'nama_tiket' => $tiket->nama_tiket,
                     'harga_satuan' => $tiket->harga,
                     'jumlah' => $detail['jumlah'],
                     'subtotal' => $subtotal,
                 ];
+                
+                // Add vehicle number if it exists
+                if (isset($detail['no_kendaraan'])) {
+                    $detailItem['no_kendaraan'] = $detail['no_kendaraan'];
+                }
+                
+                $detailTransaksi[] = $detailItem;
             }
 
             // Simpan transaksi utama
@@ -104,14 +267,21 @@ class TransaksiTiketController extends Controller
                 'order_id' => $orderId,
             ]);
 
-            // Simpan detail transaksi
+            // Simpan detail transaksi (Updated to include no_kendaraan)
             foreach ($detailTransaksi as $detail) {
-                DetailTransaksiTiket::create([
+                $detailData = [
                     'id_transaksi_tiket' => $transaksi->id_transaksi_tiket,
                     'id_tiket' => $detail['id_tiket'],
                     'jumlah' => $detail['jumlah'],
                     'subtotal' => $detail['subtotal'],
-                ]);
+                ];
+                
+                // Add no_kendaraan to database record if it exists
+                if (isset($detail['no_kendaraan'])) {
+                    $detailData['no_kendaraan'] = $detail['no_kendaraan'];
+                }
+                
+                DetailTransaksiTiket::create($detailData);
             }
 
             $responseData = [
@@ -123,7 +293,7 @@ class TransaksiTiketController extends Controller
                 'user' => [
                     'id_user' => $user->id_user,
                     'name' => $user->name,
-                    'email' => $user->email,
+                    'username' => $user->usernanme,
                 ],
                 'detail_transaksi' => $detailTransaksi,
             ];
@@ -134,7 +304,8 @@ class TransaksiTiketController extends Controller
                 $params = [
                     'external_id' => $orderId,
                     'amount' => $totalHarga,
-                    'payer_email' => $user->email,
+                    'payer_email' => "$user->username@sumbercomplang.com",
+                    'invoice_duration' => 30,
                     'description' => 'Pembayaran tiket dengan order ID ' . $orderId,
                     // 'payment_methods' => ['CREDIT_CARD', 'BANK_TRANSFER', 'QRIS', 'EWALLET'],
                     'success_redirect_url' => url('/payment/success'),
@@ -157,17 +328,20 @@ class TransaksiTiketController extends Controller
                     ],
                     201,
                 );
+            }else{
+                // Jika metode tunai
+                $transaksi->status = 'selesai'; // Set status selesai untuk transaksi tunai
+                $transaksi->save();
+                
+                return response()->json(
+                    [
+                        'success' => true,
+                        'message' => 'Transaksi tunai berhasil dibuat dan selesai.',
+                        'data' => $responseData,
+                    ],
+                    201,
+                );
             }
-
-            // Jika metode tunai
-            return response()->json(
-                [
-                    'success' => true,
-                    'message' => 'Transaksi tunai berhasil dibuat.',
-                    'data' => $responseData,
-                ],
-                201,
-            );
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(
                 [
@@ -178,6 +352,15 @@ class TransaksiTiketController extends Controller
                 422,
             );
         } catch (\Exception $e) {
+            // Enhanced logging
+            Log::error('Transaction creation failed', [
+                'error_message' => $e->getMessage(),
+                'error_code' => $e->getCode(),
+                'error_file' => $e->getFile(),
+                'error_line' => $e->getLine(),
+                'request_data' => $request->all(),
+                'user_id' => Auth::id(),
+            ]);
             return response()->json(
                 [
                     'success' => false,
@@ -229,7 +412,6 @@ class TransaksiTiketController extends Controller
                 case 'PENDING':
                     $transaksi->status = 'menunggu';
                     break;
-                case 'EXPIRED':
                 case 'FAILED':
                     $transaksi->status = 'dibatalkan';
                     break;
@@ -246,7 +428,6 @@ class TransaksiTiketController extends Controller
             return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
         }
     }
-
 
     public function notification(Request $request)
     {
@@ -343,7 +524,7 @@ class TransaksiTiketController extends Controller
                     'user' => [
                         'id_user' => $transaksi->user->id_user,
                         'nama' => $transaksi->user->name,
-                        'email' => $transaksi->user->email,
+                        'username' => $transaksi->user->username,
                     ],
                     'detail_tiket' => $detail,
                 ],
@@ -374,6 +555,7 @@ class TransaksiTiketController extends Controller
             'grossAmount' => $grossAmount,
         ]);
     }
+
     public function showTransactionDetail($orderId)
     {
         try {
@@ -396,11 +578,15 @@ class TransaksiTiketController extends Controller
             // Persiapkan detail transaksi
             $detail = $transaksi->detailTransaksiTiket->map(function ($item) {
                 return [
+                    'id_dt_transaksi' => $item->id_detail_transaksi_tiket,
                     'id_tiket' => $item->id_tiket,
                     'nama_tiket' => $item->tiket->nama_tiket,
+                    'jenis_tiket' => $item->tiket->jenis, // Added ticket type
                     'harga' => $item->tiket->harga,
                     'jumlah' => $item->jumlah,
                     'subtotal' => $item->subtotal,
+                    'no_kendaraan' => $item->no_kendaraan ?? null,
+                    'waktu_validasi' => $item->waktu_validasi
                 ];
             });
 
@@ -416,7 +602,7 @@ class TransaksiTiketController extends Controller
                     'payment_type' => $transaksi->metode_pembayaran,
                     'customer' => [
                         'name' => $transaksi->user->name,
-                        'email' => $transaksi->user->email,
+                        'username' => $transaksi->user->username,
                     ],
                     'detail_transaksi' => $detail,
                     'redirect_url' => $transaksi->redirect_url,
@@ -440,10 +626,13 @@ class TransaksiTiketController extends Controller
             $transaksi = TransaksiTiket::where('order_id', $orderId)->first();
 
             if (!$transaksi) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Transaksi tidak ditemukan.',
-                ], 404);
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' => 'Transaksi tidak ditemukan.',
+                    ],
+                    404,
+                );
             }
 
             // Update status transaksi menjadi "dibatalkan"
@@ -459,11 +648,110 @@ class TransaksiTiketController extends Controller
                 ],
             ]);
         } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
-            ], 500);
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
+                ],
+                500,
+            );
         }
     }
 
+    public function validatePartialTickets(Request $request)
+    {
+
+        Log::info('data transaksi masuk', $request->all());
+        try {
+            // Validate request
+            $validated = $request->validate([
+                'order_id' => 'required|string|exists:transaksi_tiket,order_id',
+                'ticket_ids' => 'required|array|min:1',
+                'ticket_ids.*' => 'required|integer|exists:detail_transaksi_tiket,id_detail_transaksi_tiket',
+            ]);
+
+            // Find transaction by order ID
+            $transaksi = TransaksiTiket::with('detailTransaksiTiket')
+                ->where('order_id', $request->order_id)
+                ->firstOrFail();
+            
+            // Validate only specific tickets
+            $ticketCount = 0;
+            $now = now();
+            
+            foreach ($request->ticket_ids as $detailId) {
+                $detailTicket = DetailTransaksiTiket::where('id_detail_transaksi_tiket', $detailId)
+                    ->where('id_transaksi_tiket', $transaksi->id_transaksi_tiket)
+                    ->first();
+                
+                if ($detailTicket) {
+                    // Only update if not already validated
+                    if (!$detailTicket->waktu_validasi) {
+                        $detailTicket->waktu_validasi = $now;
+                        $detailTicket->save();
+                        $ticketCount++;
+                    }
+                }
+            }
+            
+            // Update main transaction status
+            $transaksi->status = 'divalidasi';
+            $transaksi->id_divalidasi_oleh = auth()->id();
+            
+            // Check if all detail tickets now have waktu_validasi
+            $allValidated = $transaksi->detailTransaksiTiket()
+                ->whereNull('waktu_validasi')
+                ->count() === 0;
+            
+            if ($allValidated) {
+                $transaksi->status = 'selesai';
+            }
+            
+            $transaksi->save();
+            
+            // Prepare response with validated tickets
+            $validatedDetails = DetailTransaksiTiket::with('tiket')
+                ->whereIn('id_detail_transaksi_tiket', $request->ticket_ids)
+                ->get()
+                ->map(function ($item) {
+                    return [
+                        'id_detail' => $item->id_detail_transaksi_tiket,
+                        'id_tiket' => $item->id_tiket,
+                        'nama_tiket' => $item->tiket->nama_tiket,
+                        'jenis_tiket' => $item->tiket->jenis,
+                        'harga' => $item->tiket->harga,
+                        'jumlah' => $item->jumlah,
+                        'subtotal' => $item->subtotal,
+                        'no_kendaraan' => $item->no_kendaraan ?? null,
+                        'waktu_validasi' => $item->waktu_validasi,
+                    ];
+                });
+            
+            return response()->json([
+                'success' => true,
+                'message' => $ticketCount > 0 
+                    ? "Berhasil memvalidasi {$ticketCount} tiket." 
+                    : "Semua tiket sudah divalidasi sebelumnya.",
+                'data' => [
+                    'order_id' => $transaksi->order_id,
+                    'status' => $transaksi->status,
+                    'all_validated' => $allValidated,
+                    'validated_tickets' => $validatedDetails,
+                ]
+            ]);
+            
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validasi gagal',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal memvalidasi tiket.',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
 }

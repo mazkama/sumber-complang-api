@@ -6,6 +6,8 @@ use App\Http\Controllers\TransaksiTiketController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\KolamController;
 use App\Http\Controllers\TiketController;
+use App\Http\Controllers\ProfilController;
+use App\Http\Controllers\DashboardController;
 
 /*
 |--------------------------------------------------------------------------
@@ -24,6 +26,7 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/transaksi-tiket', [TransaksiTiketController::class, 'index']);
+    Route::get('/transaksi/export/monthly', [TransaksiTiketController::class, 'exportMonthlyReport']);
     Route::post('/transaksi-tiket', [TransaksiTiketController::class, 'createTransaction']);
 });
 
@@ -33,7 +36,8 @@ Route::get('/transaksi/detail/{orderId}', [TransaksiTiketController::class, 'sho
 Route::post('/midtrans-notification', [TransaksiTiketController::class, 'notification']);
 Route::post('/xendit-notification', [TransaksiTiketController::class, 'xenditNotification']);
 Route::get('/final-transaksi/{order_id}', [TransaksiTiketController::class, 'finalTransaction']);
-
+Route::post('/tiket/validate-partial', [TransaksiTiketController::class, 'validatePartialTickets'])
+    ->middleware('auth:sanctum');
 Route::apiResource('kolam', KolamController::class);
 
 Route::get('/tiket', [TiketController::class, 'index']);
@@ -41,5 +45,11 @@ Route::post('/tiket', [TiketController::class, 'store']);
 Route::put('/tiket/{id}', [TiketController::class, 'update']);
 Route::get('/tiket/used/{idOrder}', [TiketController::class, 'usedTiket'])->middleware('auth:sanctum');
 
+
+Route::get('/dashboard/statistics', [DashboardController::class, 'getStatistics'])
+    ->middleware('auth:sanctum');
+
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
+
+Route::put('/profile', [ProfilController::class, 'update'])->middleware('auth:sanctum');

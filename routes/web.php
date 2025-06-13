@@ -20,5 +20,5 @@ Route::get('/', function () {
     return view('welcome');
 });
 
-Route::get('/payment/finish', [TransaksiTiketController::class, 'finish'])->name('payment.finish');
+Route::get('/payment/success', [TransaksiTiketController::class, 'finish'])->name('payment.finish');
 

@@ -13,12 +13,14 @@ return new class extends Migration
     {
         Schema::create('transaksi_tiket', function (Blueprint $table) {
             $table->id('id_transaksi_tiket');
+            $table->string('order_id')->unique();
             $table->unsignedBigInteger('id_user');
             $table->decimal('total_harga', 15, 2);
             $table->enum('metode_pembayaran', ['ewallet', 'tunai'])->nullable();
             $table->unsignedBigInteger('id_divalidasi_oleh')->nullable();
             $table->timestamp('waktu_validasi')->nullable();
-            $table->enum('status', ['menunggu', 'dibayar', 'divalidasi'])->default('menunggu');
+            $table->enum('status', ['menunggu', 'dibayar', 'divalidasi', 'dibatalkan', 'gagal', 'selesai']);
+            $table->text('redirect_url')->nullable();
             $table->timestamps();
         
             $table->foreign('id_user')->references('id_user')->on('users')->onDelete('cascade');

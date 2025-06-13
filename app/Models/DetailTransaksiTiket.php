@@ -15,7 +15,9 @@ class DetailTransaksiTiket extends Model
 
     protected $fillable = [
         'id_transaksi_tiket', 
-        'id_tiket', 
+        'id_tiket',
+        'no_kendaraan',
+        'waktu_validasi',
         'jumlah', 
         'subtotal'
     ];

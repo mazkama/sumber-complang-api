@@ -14,76 +14,86 @@ class AuthController extends Controller
     public function register(Request $request)
     {
         $validator = Validator::make($request->all(), [
+            'username' => 'required|string|unique:users',
             'name' => 'required|string|max:255',
-            'email' => 'required|string|email|unique:users',
+            'no_hp' => 'required|string|max:15|unique:users',
             'password' => 'required|string|min:6',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
+                'code' => 422,
                 'message' => 'Validasi gagal',
                 'errors' => $validator->errors()
-            ], 422);
+            ], 200);
         }
 
         try {
             $user = User::create([
-                'name' => $request->name, // ganti 'name' jika kolom DB kamu pakai 'name'
-                'email' => $request->email,
+                'username' => $request->username,
+                'name' => $request->name, 
+                'no_hp' => $request->no_hp, 
                 'role' => "pengunjung",
                 'password' => bcrypt($request->password),
             ]);
 
             return response()->json([
+                'code' => 201,
                 'message' => 'Registrasi berhasil',
                 'user' => [
                     'id_user' => $user->id_user,
                     'name' => $user->name,
-                    'email' => $user->email,
+                    'no_hp' => $user->no_hp, 
+                    'username' => $user->username,
                     'role' => "pengunjung",
                 ]
             ], 201);
         } catch (\Exception $e) {
             return response()->json([
+                'code' => 500,
                 'message' => 'Terjadi kesalahan saat registrasi',
                 'error' => $e->getMessage()
-            ], 500);
+            ], 200);
         }
     }
 
     public function login(Request $request)
     {
         $request->validate([
-            'email' => 'required|string|email',
+            'username' => 'required|string',
             'password' => 'required|string',
         ]);
 
-        $user = User::where('email', $request->email)->first();
+        $user = User::where('username', $request->username)->first();
 
         if (!$user) {
             return response()->json([
+                'code' => 401,
                 'success' => false,
-                'message' => 'Email atau password salah.',
-            ], 401);
+                'message' => 'Username atau password salah.',
+            ], 200);
         }
 
         if (!Hash::check($request->password, $user->password)) {
             return response()->json([
+                'code' => 401,
                 'success' => false,
-                'message' => 'Email atau password salah.',
-            ], 401);
+                'message' => 'Username atau password salah.',
+            ], 200);
         }
 
         $token = $user->createToken('token')->plainTextToken;
 
         return response()->json([
+            'code' => 200,
             'success' => true,
             'message' => 'Login berhasil',
             'token' => $token,
             'user' => [
                 'id_user' => $user->id_user,
+                'username' => $user->username,
                 'name' => $user->name,
-                'email' => $user->email,
+                'no_hp' => $user->no_hp, 
                 'role' => $user->role,
             ]
         ]);
