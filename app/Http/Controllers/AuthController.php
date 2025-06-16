@@ -99,4 +99,57 @@ class AuthController extends Controller
         ]);
     }
 
+    public function changePassword(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'current_password' => 'required|string',
+            'new_password' => 'required|string|min:6',
+            'confirm_password' => 'required|string|same:new_password',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'code' => 422,
+                'message' => 'Validasi gagal',
+                'errors' => $validator->errors()
+            ], 200);
+        }
+
+        try {
+            // Mendapatkan user yang sedang login
+            $user = $request->user();
+
+            // Memverifikasi password lama
+            if (!Hash::check($request->current_password, $user->password)) {
+                return response()->json([
+                    'code' => 401,
+                    'message' => 'Password lama tidak sesuai'
+                ], 200);
+            }
+
+            // Memastikan password baru tidak sama dengan password lama
+            if (Hash::check($request->new_password, $user->password)) {
+                return response()->json([
+                    'code' => 422,
+                    'message' => 'Password baru tidak boleh sama dengan password lama'
+                ], 200);
+            }
+
+            // Update password
+            $user->password = bcrypt($request->new_password);
+            $user->save();
+
+            return response()->json([
+                'code' => 200,
+                'message' => 'Password berhasil diubah'
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'code' => 500,
+                'message' => 'Terjadi kesalahan saat mengubah password',
+                'error' => $e->getMessage()
+            ], 200);
+        }
+    }
 }

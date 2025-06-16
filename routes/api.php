@@ -51,5 +51,6 @@ Route::get('/dashboard/statistics', [DashboardController::class, 'getStatistics'
 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
+Route::post('/change-password', [AuthController::class, 'changePassword'])->middleware('auth:sanctum');
 
 Route::put('/profile', [ProfilController::class, 'update'])->middleware('auth:sanctum');
